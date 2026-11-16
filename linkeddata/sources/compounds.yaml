@@ -1,0 +1,12 @@
+name: compounds
+title: Compounds
+parser: compounds
+# The table of chemicals of the glossary, with the Compound Wiki item of each compound (an ID such as Q2026).
+files:
+  chemicals: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/glossary/templates/chemicals.tsv
+# The Compound Wiki items of the compounds of the glossary, read with rdfsolve. Optionally, also all items of a class
+# in the Wikibase: give the property (membership) and the item of the class (members), as VHP4Safety does with
+# membership: https://compoundcloud.wikibase.cloud/prop/direct/P21 and members: https://compoundcloud.wikibase.cloud/entity/Q2059
+wikibase:
+  endpoint: https://compoundcloud.wikibase.cloud/query/sparql
+  entity: https://compoundcloud.wikibase.cloud/entity/

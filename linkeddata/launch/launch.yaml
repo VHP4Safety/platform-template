@@ -1,0 +1,20 @@
+# Corrections made once by python -m linkeddata launch, after the import of every source.
+# Each correction is saved as a revision with its reason (why). Fields are named as in JSON-LD, and values as stored.
+# With "to", the record is moved to that address, and merged with the record there, if there is one. "as" is the
+# class of a new record at that address. Links to the old address are changed to the new address.
+#
+# Examples, from the launch of VHP4Safety:
+#
+#   - record: casestudies/kidney
+#     why: Datasets are moved from tools to data.
+#     move:
+#       - {field: tool, to: supply, as: HowToSupply, values: ["Clinical data", "Cell viability data"]}
+#   - record: casestudies/thyroid
+#     why: HTML characters are escaped.
+#     replace:
+#       - {field: text, from: "A BER < 1", to: "A BER &lt; 1"}
+#   - record: people/insilica-co
+#     why: Insilica is an organisation.
+#     to: organizations/insilica-co
+#     as: Organization
+corrections: []

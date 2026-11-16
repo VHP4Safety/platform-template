@@ -1,0 +1,218 @@
+/* === Breadcrumb === */
+nav.navbar[aria-label="breadcrumb"] {
+    background-color: #e9ecef;
+}
+
+/* Breadcrumb Items */
+.breadcrumb {
+    padding: 0.55rem 0.80rem;
+    margin: 0;
+}
+
+.breadcrumb-item a {
+    text-decoration: none !important;
+}
+
+.breadcrumb-item a:hover {
+    color: var(--bs-vhppink-distinct);
+}
+
+.breadcrumb-item.active {
+    color: var(--bs-vhppink-distinct);
+}
+
+/*--- Workflow state styling section ---*/
+.workflow-header {
+    top: 0px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #d0d4da;
+    padding: 10px 10px;
+}
+
+.workflow-header h5 {
+    margin: 0 0 10px 0;
+    font-weight: bold;
+    text-align: center;
+}
+
+.step-tracker {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    overflow: visible; 
+    gap: 12px;
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 10px 10px;
+}
+
+.step-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 70px;
+    flex: 1;
+    cursor: pointer;
+}
+
+.step-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid #cfd4db;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+    line-height: 1;
+    transition: all 0.3s;
+}
+
+.step-text {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #000000;
+    line-height: 1.2;
+    max-width: 130px;
+}
+
+.step-line {
+    flex: 1;
+    height: 3px;
+    background: #d0d4da;
+    border-radius: 2px;
+    margin: 0 4px;
+    align-self: center;
+    transition: background 0.3s;
+}
+
+/* Coloring of the steps of the workflowheader */
+.step-item[data-step="1"] .step-icon { background-color: var(--bs-vhppink-distinct); border-color: var(--bs-vhppink-distinct); }
+.step-item[data-step="2"] .step-icon { background-color: var(--bs-vhpdarkpurple);  border-color: var(--bs-vhpdarkpurple);}
+.step-item[data-step="3"] .step-icon { background-color: var(--bs-vhpdarkteal); border-color: var(--bs-vhpdarkteal); }
+.step-item[data-step="4"] .step-icon { background-color: var(--bs-vhplightteal); border-color: var(--bs-vhplightteal); } /*== I added this bootstrap color, since the bs-version of the vhplight purple did not exist==*/
+.step-item[data-step="5"] .step-icon { background-color: var(--bs-vhpblue) ; border-color: var(--bs-vhpblue); }
+
+/* Non-active or non-completed steps are greyed out */
+.step-item:not(.completed):not(.active) .step-icon {
+  background: #ffffff ;
+  border-color: #cfd4db ;
+  color: #cfd4db;
+}
+
+/* Skipped steps are greyed, with dashed lines */
+.step-item.skipped .step-icon {
+  border-style: dashed;
+}
+
+.step-item.skipped .step-text {
+  color: #9aa0a6;
+}
+
+.step-item.skipped + .step-line,
+.step-line:has(+ .step-item.skipped) {
+  background: repeating-linear-gradient(90deg, #d0d4da 0 6px, transparent 6px 10px);
+}
+
+/* Active & completed steps keep their step color */
+.step-item.active .step-icon,
+.step-item.completed .step-icon {
+  color: #ffffff;
+  opacity: 1;
+  border-width: 2px;
+  box-shadow:
+    0 0 0 4px rgba(0, 0, 0, 0.12),
+    0 0 12px rgba(0, 0, 0, 0.25);
+  transform: scale(1.08);
+}
+
+/* General settings for mobile screens ≤ 375px */
+@media (max-width: 408px) {
+
+nav.navbar[aria-label="breadcrumb"] {
+    background-color: #e9ecef;
+    position: sticky;
+    float: left;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: auto;
+    margin: 0;
+    padding-right: 8px;
+    box-sizing: border-box;
+}
+
+.workflow-header {
+    margin-top: 0;  
+    padding-top: 5px; 
+    padding-bottom: 5px; 
+  
+}
+
+}
+
+/* Specific mobile step tracker adjustments for horizontal scroll */
+@media (max-width: 576px) {
+  .step-tracker {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;       /* horizontal scroll */
+    overflow-y: hidden;     /*this is here to prevent vertical scroll inside the grey progress bar */
+    padding-bottom: 8px;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch; 
+  }
+
+  .step-tracker::-webkit-scrollbar {
+    height: 6px; 
+  }
+
+  .step-tracker::-webkit-scrollbar-thumb {
+    background-color: rgba(0,0,0,0.3);
+    border-radius: 3px;
+  }
+
+  .step-item {
+    flex: 0 0 auto; 
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    min-width: 80px;
+  }
+
+  .step-line {
+        flex: 0 0 30px;
+        min-width: 30px;
+        height: 2px;
+        background: #d0d4da;
+        align-self: center;
+    }
+
+  .step-icon {
+    width: 28px;
+    height: 28px;
+    font-size: 0.75rem;
+    z-index: 1;
+  }
+
+  .step-text {
+    font-size: 0.7rem;
+    max-width: 70px;
+    text-align: center;
+    white-space: normal;
+    margin-top: 2px;
+  }
+
+}
+
+/* Completed steps: colored but calm */
+.step-item.completed .step-icon {
+  opacity: 0.85;
+}
+
+

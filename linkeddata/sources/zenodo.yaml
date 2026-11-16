@@ -1,0 +1,7 @@
+name: zenodo
+title: Zenodo community, datasets
+# The datasets of a Zenodo community. Give the identifier of your community and set enabled to true.
+enabled: false
+community: YOUR-COMMUNITY
+url: https://zenodo.org/api/records?communities=YOUR-COMMUNITY&type=dataset&size=25&sort=newest
+parser: zenodo

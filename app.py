@@ -1,0 +1,1168 @@
+################################################################################
+### Loading the required modules
+import json
+import os
+import re
+import secrets
+from datetime import datetime, timedelta, timezone
+
+import nh3
+import requests
+import urllib.parse
+from flask import Flask, abort, g, jsonify, redirect, render_template, request, Response, send_from_directory, url_for
+from jinja2 import TemplateNotFound
+from markupsafe import Markup
+from rdflib import URIRef
+from rdflib.namespace import SDO
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.routing import BaseConverter
+
+from admin.writes import slug
+from database import records
+from database.images import NAME, folder
+from database.tables import Record
+from linkeddata import crates, documents, pages, void
+from linkeddata.profile import PROFILES, hierarchy, settings
+from routes import records_api
+from routes.account import blueprint as account_blueprint
+from routes.changes import blueprint as changes_blueprint
+from routes.editor import blueprint as admin_blueprint
+
+################################################################################
+MAX_PAGE_SIZE = 48
+
+# SEO defaults. Every page renders a <title>/<meta description> (see base.html);
+# routes override page_title / meta_description with page-specific values, and
+# inject_seo_defaults() falls back to these for anything that does not.
+# The name of the platform (linkeddata/model/v1/settings.yaml), used in the page titles.
+SITE = settings()["title"]
+DEFAULT_PAGE_TITLE = SITE
+
+
+def clip(text, limit=160):
+    """Trim a description to a search-snippet-friendly length (~160 chars)."""
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def page_args(default_size: int) -> tuple[int, int]:
+    """Read ?page and ?page_size from the request, kept within sensible bounds."""
+    page = max(request.args.get("page", 1, type=int), 1)
+    page_size = request.args.get("page_size", default_size, type=int)
+    return page, min(max(page_size, 1), MAX_PAGE_SIZE)
+
+################################################################################
+class RegexConverter(BaseConverter):
+    """Converter for regular expression routes.
+
+    References
+    ----------
+    Scholia views.py
+    https://stackoverflow.com/questions/5870188
+
+    """
+
+    def __init__(self, url_map, *items):
+        """Set up regular expression matcher."""
+        super(RegexConverter, self).__init__(url_map)
+        self.regex = items[0]
+
+
+app = Flask(__name__)
+# The client address, scheme and host are taken from the reverse proxy, for the rate limits and the ORCID login.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+if not os.environ.get("SECRET_KEY"):
+    app.logger.warning("SECRET_KEY is not set: logins end on restart, and fail with several workers.")
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_DEBUG") != "1"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
+# With the __Host- prefix, the cookie is sent only to this host. The prefix is accepted only on a secure cookie.
+if app.config["SESSION_COOKIE_SECURE"]:
+    app.config["SESSION_COOKIE_NAME"] = "__Host-session"
+app.register_blueprint(account_blueprint)
+app.register_blueprint(admin_blueprint)
+records_api.limiter.init_app(app)
+records_api.register(app)
+app.register_blueprint(changes_blueprint)
+# Google Search Console verification token (rendered as a <meta> tag in
+# base.html when set). Kept out of the repo -- set it in the service env.
+app.config["GOOGLE_SITE_VERIFICATION"] = os.environ.get("GOOGLE_SITE_VERIFICATION", "")
+# The class hierarchy of the vocabularies is read once, at start, not at the first request.
+hierarchy()
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Content-Security-Policy", "object-src 'none'; base-uri 'self'")
+    return response
+
+
+def local_link(tag: str, attribute: str, value: str) -> str:
+    """Return the address of a link or an image in a text as a path on this server."""
+    return page_link(value) if attribute in ("href", "src") else value
+
+
+@app.template_filter("sanitize_html")
+def sanitize_html(value) -> Markup:
+    """Keep the formatting tags of upstream HTML; scripts and event handlers are removed."""
+    return Markup(nh3.clean(str(value or ""), attribute_filter=local_link))
+
+
+def get_process_flow_steps() -> dict:
+    """Return the process flow steps of the glossary by address, with label, slug and description."""
+    return pages.steps()
+
+
+def get_service_detail(tool_id: str) -> dict:
+    """Return the details of the tool tool_id from its record, or an empty dict."""
+    record = records.get(records.address(f"tools/{tool_id}"))
+    if record is None or record.part_of is not None:
+        return {}
+    return pages.tool_details(record)
+
+
+def page_record(path: str) -> dict:
+    """Return the content of the page record at path, or abort with 404."""
+    record = records.get(records.address(path))
+    if record is None:
+        abort(404)
+    return pages.page(record)
+
+
+@app.context_processor
+def inject_site():
+    """Return the name of the platform, its project and its glossary (settings.yaml) as site, for the templates."""
+    given = settings()
+    # The use cases for the navigation menu, by name and path.
+    studies = [{"name": study["name"], "path": "/" + records.path(study["address"])} for study in pages.case_studies()]
+    return {"site": {"title": given["title"], "project": given["project"], "glossary": given["glossary"], "base": given["base"],
+                     "contact_form": given["contact form"], "visit_counter": given["visit counter"]},
+            "casestudies_menu": sorted(studies, key=lambda study: (study["name"] or "").lower())}
+
+
+# Provide methods list to all templates for the Methods dropdown in the navbar
+@app.context_processor
+def inject_methods_menu():
+    """Return the methods for the navigation menu and the search bar."""
+    return {"methods_menu": pages.menu("methods")}
+
+
+@app.context_processor
+def inject_tools_menu():
+    """Return the tools for the navigation menu and the search bar."""
+    return {"tools_menu": pages.menu("tools")}
+
+
+@app.context_processor
+def inject_data_menu():
+    """Return the datasets for the navigation menu and the search bar."""
+    return {"data_menu": pages.menu("data")}
+
+
+@app.context_processor
+def inject_seo_defaults():
+    """Provide SEO defaults so every page has a title/description/canonical.
+
+    Routes override page_title / meta_description via render_template kwargs
+    (explicit context wins over context processors). canonical_url defaults to
+    the address of the record of the page, else the page path under the
+    platform address.
+    """
+    return {
+        "page_title": DEFAULT_PAGE_TITLE,
+        "meta_description": void.platform()["abstract"],
+        "canonical_url": g.record.iri if "record" in g else records.address(request.path.strip("/")),
+    }
+
+
+################################################################################
+### The landing page
+@app.route("/")
+def home():
+    record = records.get(settings()["base"])
+    if record is None:
+        abort(404)
+    platform = pages.catalogue_of(record)
+    workflow = records.get(records.address("safety_assessment_workflow"))
+    return render_template(
+        "home.html",
+        platform=platform,
+        workflow=pages.page(workflow) if workflow is not None else None,
+        process_flow_steps=get_process_flow_steps(),
+        page_title=DEFAULT_PAGE_TITLE,
+        meta_description=platform["abstract"],
+    )
+
+
+################################################################################
+### The sitemap.xml for search engines
+@app.route("/sitemap.xml")
+def sitemap():
+    BASE = records.address("").rstrip("/")
+
+    # Static, parameter-less GET pages, derived from the URL map so new pages
+    # are picked up automatically. Machine endpoints are excluded. Routes with
+    # <params> are skipped and handled below.
+    EXCLUDED_ENDPOINTS = {"sitemap", "robots", "static", "models_page", "api_catalog", "void_description"}
+    # The pages for editors (login, tokens, editing, changes) and the API are left out.
+    EXCLUDED_BLUEPRINTS = {"account", "admin", "changes", "records", "api-docs"}
+    paths = sorted(
+        rule.rule.rstrip("/") or "/"
+        for rule in app.url_map.iter_rules()
+        if not rule.arguments
+        and rule.endpoint not in EXCLUDED_ENDPOINTS
+        and rule.endpoint.split(".")[0] not in EXCLUDED_BLUEPRINTS
+        and "GET" in (rule.methods or set())
+    )
+
+    # Record pages, with the time of their last change
+    changed = {}
+    for address, time in records.with_pages():
+        changed["/" + records.path(address)] = time
+    paths += sorted(changed)
+
+    # Dedupe while preserving order
+    seen = set()
+    unique_paths = [p for p in paths if not (p in seen or seen.add(p))]
+
+    url_entries = "\n".join(
+        f"  <url>\n    <loc>{BASE}{p}</loc>\n" + (f"    <lastmod>{changed[p]}</lastmod>\n" if p in changed else "") + "  </url>"
+        for p in unique_paths
+    )
+    sitemapContent = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{url_entries}\n"
+        "</urlset>\n"
+    )
+    return Response(sitemapContent, mimetype="text/xml")
+
+
+################################################################################
+### robots.txt points crawlers at the sitemap so the detail pages get indexed
+@app.route("/robots.txt")
+def robots():
+    robotsContent = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /admin/\n"
+        "\n"
+        f"Sitemap: {records.address('sitemap.xml')}\n"
+    )
+    return Response(robotsContent, mimetype="text/plain")
+
+
+################################################################################
+### Pages under 'Data'
+@app.route("/data")
+def data():
+    # Pass data to template
+    return render_template(
+        "data/data.html",
+        page_title=f"Data — {SITE}",
+        meta_description=f"Browse the datasets and studies of the {SITE}.",
+        **pages.data_listing(request.args),
+    )
+
+
+################################################################################
+### DataSet detail view
+
+
+@app.template_filter("split_text_int")
+def split_text_int(value: None | str) -> tuple[str, None | int]:
+    """
+    Splits trailing integer from a string.
+    'S-ABCD21' -> ('S-ABCD', 21)
+    'ABC'      -> ('ABC', None)
+    'X-12A'    -> ('X-12A', None)   # only splits if digits are at the very end
+    """
+    # used to construct ftp file link *POTENTIALLY BRITTLE*
+    if value is None:
+        return ("", None)
+
+    s = str(value)
+    m = re.match(r"^(.*?)(\d+)$", s)
+    if not m:
+        return (s, None)
+
+    return (m.group(1), int(m.group(2)))
+
+
+@app.route("/data/<dataid>")
+def data_detail(dataid):
+    found = records.get(records.address(f"data/{dataid}"))
+    if found is None or found.part_of is not None:
+        abort(404)
+    filters = pages.catalogue_filters("data", records.latest_change())
+    reg_q_labels = filters["reg_q_labels"]
+    reg_q_urls = filters["reg_q_urls"]
+    reg_q_steps = filters["reg_q_steps"]
+    record = pages.catalogue_details(found)
+    rec_title = record.get("title") or "Dataset"
+    rec_desc = record.get("description") or record.get("abstract") or ""
+    return render_template(
+        "data/data_details.html",
+        data=record,
+        reg_q_labels=reg_q_labels,
+        reg_q_urls=reg_q_urls,
+        reg_q_steps=reg_q_steps,
+        page_title=f"{rec_title} — {SITE} data",
+        meta_description=clip(rec_desc)
+        or f"{rec_title}: a dataset of the {SITE}.",
+    )
+
+
+################################################################################
+### Pages under 'Models'
+@app.route("/models")
+def models():
+    # Get query parameters for pagination and search
+    page, page_size = page_args(18)
+    search_query = request.args.get("query", "", type=str)
+
+    # Get filter parameters
+    filter_case_study = request.args.get("filter_case_study", "", type=str)
+    filter_regulatory_question = request.args.get(
+        "filter_regulatory_question", "", type=str
+    )
+    filter_flow_step = request.args.get("filter_flow_step", "", type=str)
+
+    # Build filter list (only include non-empty filters)
+    filters = []
+    if filter_case_study:
+        filters.append(("case_study", filter_case_study))
+    if filter_regulatory_question:
+        filters.append(("regulatory_question", filter_regulatory_question))
+    if filter_flow_step:
+        filters.append(("flow_step", filter_flow_step))
+
+    # Fetch data based on search query or list all
+    results = pages.model_listing(search_query, page, page_size, filters)
+
+    # Extract studies and metadata
+    studies = results.get("hits", [])
+    total = results.get("total", 0)
+    error = results.get("error", None)
+
+    # Get filtering metadata (if filters were applied)
+    filters_applied = results.get("filters_applied", False)
+    hits_returned = results.get("hits_returned", len(studies))
+    pages_fetched = results.get("pages_fetched", 1)
+    page_size_met = results.get("page_size_met", True)
+
+    # Calculate pagination info
+    has_next = (page * page_size) < total
+    has_prev = page > 1
+
+    # Pass model data to template
+    return render_template(
+        "models_page.html",
+        page_title=f"Models — {SITE}",
+        meta_description=f"Explore the computational models of the {SITE}.",
+        studies=studies,
+        total=total,
+        page=page,
+        page_size=page_size,
+        search_query=search_query,
+        collection_name=BIOSTUDIES_COLLECTION_NAME,
+        error=error,
+        has_next=has_next,
+        has_prev=has_prev,
+        filter_case_study=filter_case_study,
+        filter_regulatory_question=filter_regulatory_question,
+        filter_flow_step=filter_flow_step,
+        filters_applied=filters_applied,
+        hits_returned=hits_returned,
+        pages_fetched=pages_fetched,
+        page_size_met=page_size_met,
+        # The filter values are the case studies, questions and steps of the data.
+        **pages.catalogue_filters("data", records.latest_change()),
+    )
+
+
+@app.route("/models_page")
+def models_page():
+    return redirect(url_for("models"), code=301)
+
+
+################################################################################
+### Pages under 'Tools'
+
+
+### Here begins the updated version for creating the tool list page.
+@app.route("/tools")
+def tools():
+    try:
+        return render_template(
+            "tools/tools.html",
+            page_title=f"Tools — {SITE}",
+            meta_description=f"Browse the catalogue of tools of the {SITE}.",
+            **pages.catalogue_listing("tools", request.args),
+        )
+
+    except Exception:
+        app.logger.exception("Tools page failed")
+        return "Error processing service data", 500
+
+
+### New route to list methods (similar to the tools page)
+@app.route("/methods")
+@app.route("/methods/")
+def methods():
+    """Render the methods listing from the records."""
+    try:
+        # Pass everything the template expects
+        return render_template(
+            "methods/methods.html",
+            page_title=f"Methods — {SITE}",
+            meta_description=f"Browse the catalogue of methods of the {SITE}.",
+            **pages.catalogue_listing("methods", request.args),
+        )
+
+    except Exception:
+        app.logger.exception("Methods page failed")
+        return "Error processing methods data", 500
+
+
+@app.route("/methods/<methodid>")
+def method_page(methodid):
+    """Render the page of a method from its record."""
+    record = records.get(records.address(f"methods/{methodid}"))
+    if record is None or record.part_of is not None:
+        abort(404)
+    method_details = {}
+    method_json = pages.method_json(record)
+
+    # Mirror the template's title/description resolution (methods/method.html)
+    src = method_json if isinstance(method_json, dict) else method_details
+    method_name = (
+        src.get("method")
+        or src.get("method_name_content")
+        or src.get("service")
+        or methodid
+    )
+    method_desc = (
+        src.get("method_description_content")
+        or src.get("method_description")
+        or src.get("description")
+        or ""
+    )
+    # Pass both to the template: some templates expect method_json, others method_details
+    return render_template(
+        "methods/method.html",
+        method=method_details,
+        method_details=method_details,
+        method_json=method_json,
+        page_title=f"{method_name} — {SITE}",
+        meta_description=clip(method_desc)
+        or f"{method_name}, a method of the {SITE}.",
+    )
+
+
+@app.route("/tools/<toolname>")
+def tool_page(toolname):
+    # get the tools metadata:
+    tool_details = get_service_detail(toolname)
+    if not tool_details:
+        abort(404)
+
+    tool_meta = tool_details
+    tool_name = tool_meta.get("service") or tool_meta.get("title") or toolname
+    return render_template(
+        "tools/tool.html",
+        tool_json=tool_meta,
+        tool_details=tool_details,
+        process_flow_steps=get_process_flow_steps(),
+        page_title=f"{tool_name} — {SITE}",
+        meta_description=clip(tool_meta.get("description"))
+        or f"{tool_name}, a tool of the {SITE}.",
+    )
+
+
+@app.route("/models/<modelid>")
+def model_page(modelid):
+    found = records.get(records.address(f"models/{modelid}"))
+    if found is None or found.part_of is not None:
+        abort(404)
+    reg_q_labels = pages.catalogue_filters("data", records.latest_change())["reg_q_labels"]
+    data = pages.catalogue_details(found)
+    return render_template(
+        "models/model.html", data=data, reg_q_labels=reg_q_labels, outline=pages.outline(found),
+        page_title=f"{data['title']} — {SITE} models",
+        meta_description=clip(data["description"]) or f"{data['title']}: a model of the {SITE}.",
+    )
+
+
+@app.route("/model/<modelid>")
+def model_redirect(modelid):
+    """Redirect the address of a model in Zenodo to its model page, or to the models listing if models share it."""
+    found = pages.based_on("models", f"https://zenodo.org/records/{modelid}")
+    if len(found) == 1:
+        return redirect(page_link(found[0]), code=301)
+    if found:
+        return redirect(url_for("models"), code=302)
+    return redirect(url_for("model_page", modelid=modelid), code=301)
+
+
+################################################################################
+### Pages under 'Implementation'
+
+
+# General Explore our work
+@app.route("/explore_our_work")
+def explore_our_work():
+    return render_template(
+        "records/page.html",
+        page=page_record("explore_our_work"),
+        page_title=f"Project — {SITE}",
+        meta_description=f"About the project behind the {SITE}.",
+    )
+
+
+# General Training
+@app.route("/training")
+def training():
+    return render_template(
+        "records/page.html",
+        page=page_record("training"),
+        listed=pages.items(records.page(settings()["kinds"]["training"], {}, "", 0, None)[1]),
+        page_title=f"Training — {SITE}",
+        meta_description=f"Training materials and courses on the {SITE}.",
+    )
+
+
+# General Impact
+@app.route("/impact")
+def impact():
+    return render_template(
+        "records/page.html",
+        page=page_record("impact"),
+        page_title=f"Impact — {SITE}",
+        meta_description=f"The scientific and societal impact of the {SITE}.",
+    )
+
+
+################################################################################
+### Pages under 'Process Flow'
+
+
+# General Process Flow page: the process flow steps of the glossary
+@app.route("/safety_assessment_workflow")
+def SafetyAssessmentWorkflow():
+    page = page_record("safety_assessment_workflow")
+    return render_template(
+        "safety_assessment_workflow.html", process_flow_steps=get_process_flow_steps(),
+        page=page, page_title=f"Process Flow — {SITE}", meta_description=clip(page["description"]),
+    )
+
+
+################################################################################
+### Pages under 'Case Studies'
+
+
+# General case studies page
+@app.route("/casestudies")
+def workflows():
+    return render_template(
+        "case_studies/casestudies.html",
+        case_studies=pages.case_studies(),
+        page_title=f"Use cases — {SITE}",
+        meta_description=f"Explore the use cases of the {SITE} that connect tools, methods and data to real questions.",
+    )
+
+
+# Individual case study page, dynamically filled based on URL
+@app.route("/casestudies/<case>")
+@app.route("/casestudies/<case>/<question>")
+@app.route("/casestudies/<case>/<question>/<step>")
+@app.route("/casestudies/<case>/<question>/<step>/<step2>")
+@app.route("/casestudies/<case>/<question>/<step>/<step2>/<step3>")
+@app.route("/casestudies/<case>/<question>/<step>/<step2>/<step3>/<step4>")
+@app.route("/casestudies/<case>/<question>/<step>/<step2>/<step3>/<step4>/<step5>")
+# additional routes are parsed client side via js to allow smooth animation
+def casestudy(case: str = "", question: str = "", step: str = "",
+              step1: str = "", step2: str = "", step3: str = "",
+              step4: str = "", step5: str = ""):
+    record = records.get(records.address(f"casestudies/{case}"))
+    if record is None:
+        abort(404)
+    # The <question>/<step> sub-routes are JS-driven states of the same page, so
+    # canonicalise them all to the base case URL to avoid duplicate indexing.
+    address = records.address(request.path.strip("/"))
+    # An address such as /casestudies/demo/Q1/Lorem/Demo_workflow_step is matched to a page part by part.
+    if address != record.iri and records.get(address) is None:
+        wanted = [slug(part) for part in address.removeprefix(record.iri + "/").split("/")]
+        for part in records.parts_of(record.iri):
+            if [slug(given) for given in part.removeprefix(record.iri + "/").split("/")] == wanted:
+                return redirect(page_link(part), code=301)
+    found = pages.case_outline(record.iri, records.latest_change())
+    descriptions = [field["values"][0] for field in found["fields"] if field["name"] == "description"]
+    # JS will handle steps via the URL
+    return render_template(
+        "case_studies/casestudy.html",
+        case_outline=found,
+        case_document=url_for("records.read", path=f"casestudies/{case}"),
+        # At the address of a question or a step, the page record is that part. The case study is given too.
+        case_json=None if address == record.iri else documents.page_document(record.iri, records.latest_change()),
+        page_address=address,
+        config_base=records.address(""),
+        page_title=f"{record.name or case} — {SITE}",
+        meta_description=clip(descriptions[0]["text"] if descriptions else "")
+        or f"{record.name or case}: a use case of the {SITE}, connecting tools, methods and data to a question.",
+        canonical_url=record.iri,
+    )
+
+
+################################################################################
+### Pages related to chemical compounds
+
+
+def is_valid_qid(qid):
+    return re.fullmatch(r"Q\d+", qid) is not None
+
+
+def run_sparql(endpoint: str, query: str) -> dict:
+    """Run a SPARQL query with a time limit and return the JSON results."""
+    response = requests.post(
+        endpoint,
+        data={"query": query},
+        headers={"Accept": "application/sparql-results+json", "User-Agent": f"{SITE}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+@app.route("/compound/<cwid>")
+def show_compound(cwid):
+    if not is_valid_qid(cwid):
+        abort(404)
+    try:
+        return render_template("compound.html", cwid=cwid)
+    except TemplateNotFound:
+        abort(404)
+
+
+@app.route("/get_compound_properties/<cwid>")
+def show_compounds_properties_as_json(cwid):
+    if not is_valid_qid(cwid):
+        return jsonify({"error": "Invalid compound identifier"}), 400
+    compoundwikiEP = "https://compoundcloud.wikibase.cloud/query/sparql"
+    sparqlquery = (
+        "PREFIX wd: <https://compoundcloud.wikibase.cloud/entity/>\n"
+        "PREFIX wdt: <https://compoundcloud.wikibase.cloud/prop/direct/>\n\n"
+        "SELECT ?cmp ?cmpLabel ?type ?formula ?mass ?inchi ?inchiKey ?SMILES WHERE {\n"
+        "  VALUES ?cmp { wd:" + cwid + " }\n"
+        "  ?cmp wdt:P1 ?type \n"
+        "  OPTIONAL { ?cmp wdt:P9 ?inchi }\n"
+        "  OPTIONAL { ?cmp wdt:P10 ?inchiKey }\n"
+        "  OPTIONAL { ?cmp wdt:P2 ?mass }\n"
+        "  OPTIONAL { ?cmp wdt:P3 ?formula }\n"
+        "  OPTIONAL { ?cmp wdt:P7 ?chiralSMILES }\n"
+        "  OPTIONAL { ?cmp wdt:P12 ?nonchiralSMILES }\n"
+        '  BIND (COALESCE(IF(BOUND(?chiralSMILES), ?chiralSMILES, 1/0), IF(BOUND(?nonchiralSMILES), ?nonchiralSMILES, 1/0), "") AS ?SMILES)\n'
+        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }\n'
+        "}"
+    )
+    try:
+        compound_dat = run_sparql(compoundwikiEP, sparqlquery)
+    except Exception:
+        app.logger.exception("Compound query failed")
+        return jsonify({"error": "Upstream query failed"}), 500
+    if not bool(compound_dat) or not compound_dat["results"]["bindings"]:
+        return jsonify({"error": "No data found"}), 404
+    compound_dat = compound_dat["results"]["bindings"][0]
+    # return jsonify(compound_dat);
+    compound_list = [
+        {
+            "wcid": compound_dat["cmp"]["value"],
+            "label": compound_dat["cmpLabel"]["value"],
+        }
+    ]
+    if "inchi" in compound_dat:
+        compound_list[0]["inchi"] = compound_dat["inchi"]["value"]
+    if "inchiKey" in compound_dat:
+        compound_list[0]["inchikey"] = compound_dat["inchiKey"]["value"]
+    if "SMILES" in compound_dat:
+        compound_list[0]["SMILES"] = compound_dat["SMILES"]["value"]
+    if "formula" in compound_dat:
+        compound_list[0]["formula"] = compound_dat["formula"]["value"]
+    if "mass" in compound_dat:
+        compound_list[0]["mass"] = compound_dat["mass"]["value"]
+    return jsonify(compound_list), 200
+
+
+@app.route("/get_compound_identifiers/<cwid>")
+def show_compounds_identifiers_as_json(cwid):
+    if not is_valid_qid(cwid):
+        return jsonify({"error": "Invalid compound identifier"}), 400
+    compoundwikiEP = "https://compoundcloud.wikibase.cloud/query/sparql"
+    sparqlquery = (
+        "PREFIX wd: <https://compoundcloud.wikibase.cloud/entity/>\n"
+        "PREFIX wdt: <https://compoundcloud.wikibase.cloud/prop/direct/>\n\n"
+        "SELECT DISTINCT ?propertyLabel ?value ?formatterURL\n"
+        "WHERE {\n"
+        "  VALUES ?property { wd:P13 wd:P22 wd:P23 wd:P26 wd:P27 wd:P28 wd:P36 wd:P41 wd:P43 wd:P44 wd:P45 }\n"
+        "  ?property wikibase:directClaim ?valueProp .\n"
+        "  OPTIONAL { wd:" + cwid + " ?valueProp ?value }\n"
+        "  OPTIONAL { ?property wdt:P6 ?formatterURL }\n"
+        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }\n'
+        "}"
+    )
+    try:
+        compound_dat = run_sparql(compoundwikiEP, sparqlquery)
+    except Exception:
+        app.logger.exception("Compound query failed")
+        return jsonify({"error": "Upstream query failed"}), 500
+    if len(compound_dat["results"]["bindings"]) == 0:
+        return jsonify({"error": "No data found"}), 404
+    compound_dat = compound_dat["results"]["bindings"]
+    # return jsonify(compound_dat)
+
+    compound_list = []
+    for expProp in compound_dat:
+        if "value" in expProp:
+            compound_list.append(
+                {
+                    "propertyLabel": expProp["propertyLabel"]["value"],
+                    "value": expProp["value"]["value"],
+                    "formatterURL": expProp.get("formatterURL", {}).get("value", ""),
+                }
+            )
+        else:
+            compound_list.append(
+                {
+                    "propertyLabel": expProp["propertyLabel"]["value"],
+                    "value": "",
+                    "formatterURL": "",
+                }
+            )
+    return jsonify(compound_list), 200
+
+
+@app.route("/get_compound_toxicology/<cwid>")
+def show_compounds_toxicology_as_json(cwid):
+    if not is_valid_qid(cwid):
+        return jsonify({"error": "Invalid compound identifier"}), 400
+    compoundwikiEP = "https://compoundcloud.wikibase.cloud/query/sparql"
+    sparqlquery = (
+        "PREFIX wd: <https://compoundcloud.wikibase.cloud/entity/>\n"
+        "PREFIX wdt: <https://compoundcloud.wikibase.cloud/prop/direct/>\n\n"
+        "SELECT DISTINCT ?propertyLabel ?value ?formatterURL\n"
+        "WHERE {\n"
+        "  VALUES ?property { wd:P17 wd:P19 wd:P4 }\n"
+        "  ?property wikibase:directClaim ?valueProp .\n"
+        "  OPTIONAL { wd:" + cwid + " ?valueProp ?value }\n"
+        "  OPTIONAL { ?property wdt:P6 ?formatterURL }\n"
+        '  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }\n'
+        "}"
+    )
+    try:
+        compound_dat = run_sparql(compoundwikiEP, sparqlquery)
+    except Exception:
+        app.logger.exception("Compound query failed")
+        return jsonify({"error": "Upstream query failed"}), 500
+    if len(compound_dat["results"]["bindings"]) == 0:
+        return jsonify({"error": "No data found"}), 404
+    compound_dat = compound_dat["results"]["bindings"]
+    # return jsonify(compound_dat)
+
+    compound_list = []
+    for expProp in compound_dat:
+        print(expProp)
+        if "value" in expProp:
+            compound_list.append(
+                {
+                    "propertyLabel": expProp["propertyLabel"]["value"],
+                    "value": expProp["value"]["value"],
+                }
+            )
+        else:
+            compound_list.append(
+                {"propertyLabel": expProp["propertyLabel"]["value"], "value": ""}
+            )
+    return jsonify(compound_list), 200
+
+
+@app.route("/get_compound_expdata/<cwid>")
+def show_compounds_expdata_as_json(cwid):
+    if not is_valid_qid(cwid):
+        return jsonify({"error": "Invalid compound identifier"}), 400
+    compoundwikiEP = "https://compoundcloud.wikibase.cloud/query/sparql"
+    sparqlquery = (
+        "PREFIX wd: <https://compoundcloud.wikibase.cloud/entity/>\n"
+        "PREFIX wdt: <https://compoundcloud.wikibase.cloud/prop/direct/>\n"
+        "PREFIX wid: <http://www.wikidata.org/entity/>\n"
+        "PREFIX widt: <http://www.wikidata.org/prop/direct/>\n"
+        "PREFIX prov: <http://www.w3.org/ns/prov#>\n\n"
+        "SELECT ?qid WHERE {\n"
+        "  wd:P5 wikibase:directClaim ?identifierProp .\n"
+        "  wd:" + cwid + " ?identifierProp ?wikidata .\n"
+        '  BIND (iri(CONCAT("http://www.wikidata.org/entity/", ?wikidata)) AS ?qid)\n'
+        "}"
+    )
+    try:
+        compound_dat = run_sparql(compoundwikiEP, sparqlquery)
+    except Exception:
+        app.logger.exception("Compound query failed")
+        return jsonify({"error": "Upstream query failed"}), 500
+    if not bool(compound_dat):
+        return jsonify({"error": "No data found"}), 404
+    if len(compound_dat["results"]["bindings"]) == 0:
+        return jsonify({"error": "No data found"}), 404
+    compound_dat = compound_dat["results"]["bindings"][0]
+    qid = compound_dat["qid"]["value"]
+    if not re.fullmatch(r"http://www\.wikidata\.org/entity/Q\d+", qid):
+        return jsonify({"error": "No data found"}), 404
+    # the next query may be affected by https://github.com/ad-freiburg/qlever-control/issues/187
+    sparqlquery = (
+        "PREFIX wd: <http://www.wikidata.org/entity/>\n"
+        "PREFIX wdt: <http://www.wikidata.org/prop/direct/>\n"
+        "PREFIX prov: <http://www.w3.org/ns/prov#>\n"
+        "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
+        "PREFIX pr: <http://www.wikidata.org/prop/reference/>\n"
+        "PREFIX wikibase: <http://wikiba.se/ontology#>\n\n"
+        "SELECT DISTINCT ?propEntityLabel ?value ?unitsLabel ?source ?doi ?statement\n"
+        "WHERE {\n"
+        "    <" + qid + "> ?propp ?statement .\n"
+        "    ?statement a wikibase:BestRank ;\n"
+        "      ?proppsv [ wikibase:quantityAmount ?value ; wikibase:quantityUnit ?units ] .\n"
+        "    #OPTIONAL { ?statement prov:wasDerivedFrom/pr:P248 ?sourceTmp . OPTIONAL { ?sourceTmp wdt:P356 ?doiTmp . } }\n"
+        "    ?property wikibase:claim ?propp ; wikibase:statementValue ?proppsv ; wdt:P1629 ?propEntity ; wdt:P31 wd:Q21077852 .\n"
+        "    ?propEntity @en@rdfs:label ?propEntityLabel .\n"
+        "    ?units @en@rdfs:label ?unitsLabel .\n"
+        '    BIND (COALESCE(IF(BOUND(?sourceTmp), ?sourceTmp, 1/0), "") AS ?source)\n'
+        '    BIND (COALESCE(IF(BOUND(?doiTmp), ?doiTmp, 1/0), "") AS ?doi)\n'
+        "}"
+    )
+    # return sparqlquery
+    try:
+        sparqlqueryURL = (
+            "https://qlever.dev/api/wikidata?format=json&query="
+            + urllib.parse.quote_plus(sparqlquery)
+        )
+        # return sparqlqueryURL
+        compound_dat = requests.get(sparqlqueryURL, timeout=10)
+        # return json.loads(compound_dat.content)
+    except Exception:
+        app.logger.exception("Compound query failed")
+        return jsonify({"error": "Upstream query failed"}), 500
+    if not bool(compound_dat):
+        return jsonify({"error": "No data found"}), 404
+    compound_dat = json.loads(compound_dat.content)["results"]["bindings"]
+    # return jsonify(compound_dat)
+    compound_list = []
+    for expProp in compound_dat:
+        # return jsonify(expProp)
+        compound_list.append(
+            {
+                "propEntityLabel": expProp["propEntityLabel"]["value"],
+                "value": expProp["value"]["value"],
+                "unitsLabel": expProp["unitsLabel"]["value"],
+                "source": expProp["source"]["value"],
+                "doi": expProp["doi"]["value"],
+                "seeAlso": expProp["statement"]["value"],
+            }
+        )
+    return jsonify(compound_list), 200
+
+
+################################################################################
+### Pages under 'Legal'
+@app.route("/legal/terms_of_service")
+def terms_of_service():
+    return render_template(
+        "legal/terms_of_service.html",
+        page=page_record("legal/terms_of_service"),
+        page_title=f"Terms of Service — {SITE}",
+        meta_description=f"Terms of Service for the {SITE}.",
+    )
+
+
+@app.route("/legal/privacypolicy")
+def privacy_policy():
+    return render_template(
+        "legal/privacypolicy.html",
+        page=page_record("legal/privacypolicy"),
+        page_title=f"Privacy Policy — {SITE}",
+        meta_description=f"Privacy Policy for the {SITE}.",
+    )
+
+
+################################################################################
+### Pages and data of the records
+OFFERED = ["text/html", *records_api.FORMATS.values(), "application/json", "text/markdown"]
+# A page is also changed by a change of the code, such as a new release.
+STARTED = datetime.now(timezone.utc).replace(microsecond=0)
+
+
+@app.template_filter("page_link")
+def page_link(iri: str) -> str:
+    """Return a platform address as a path on this server."""
+    return pages.local(iri)
+
+
+def not_acceptable() -> Response:
+    """Return 406 with the formats of the address."""
+    lines = ["None of the formats asked for is given here. This address answers in:", "- text/html"]
+    for ending, media in records_api.FORMATS.items():
+        lines.append(f"- {media}, or with the ending {ending}")
+    lines.append("- application/json (its JSON-LD)")
+    lines.append(f"- text/markdown, or with the ending {records_api.MARKDOWN}")
+    return Response("\n".join(lines) + "\n", status=406, content_type="text/plain; charset=utf-8", headers={"Vary": "Accept"})
+
+
+def listing_page(kind: str):
+    """Return the listing page of a kind."""
+    found = pages.listing(kind, request.args)
+    return render_template("records/listing.html", listing=found, page_title=f"{found['name'] or kind.capitalize()} — {SITE}")
+
+
+def record_page(record: Record):
+    """Return the page of a record."""
+    if record.type in records.within(str(SDO.WebPage)):
+        found = pages.page(record)
+        steps = {term["iri"]: term for term in found["kinds"]}
+        return render_template("records/page.html", page=found, process_flow_steps=steps,
+                               page_title=f"{found['name']} — {SITE}",
+                               meta_description=found["description"][:160] or f"{found['name']}, a page of the {SITE}.")
+    found = pages.outline(record)
+    first = {}
+    for field in found["fields"]:
+        first[field["name"]] = field["values"][0]
+    description = first.get("description", {}).get("text")
+    image = first.get("image", {}).get("link")
+    name = record.name or record.iri
+    return render_template(
+        "records/record.html",
+        record={"iri": record.iri, "name": record.name, "description": description, "image": image},
+        outline=found,
+        page_title=f"{name} — {SITE}",
+        meta_description=(description or "")[:160] or f"{name}, a record of the {SITE}.",
+    )
+
+
+@app.before_request
+def negotiate():
+    """Return the data of a record if it is requested."""
+    if request.endpoint in ("static", "image") or request.path.startswith("/api/"):
+        return None
+    # An address with a slash at the end and without a page of its own is redirected to the address without the
+    # slash (/casestudies/ to /casestudies), so that each page has one address.
+    if request.url_rule is None and len(request.path) > 1 and request.path.endswith("/"):
+        target = "/" + urllib.parse.quote(request.path.strip("/"))
+        if request.query_string:
+            target += "?" + request.query_string.decode()
+        return redirect(target, code=308)
+    path = request.path.strip("/")
+    media = None
+    for ending, ending_media in {**records_api.FORMATS, records_api.MARKDOWN: "text/markdown"}.items():
+        if path.endswith(ending):
+            path = path.removesuffix(ending)
+            media = ending_media
+    # The page is returned for a request without Accept. For a request of other formats only, the formats are listed.
+    if media is None:
+        media = request.accept_mimetypes.best_match(OFFERED) if request.accept_mimetypes else "text/html"
+    # At the page of a kind (/tools), all records of the kind are given in the formats of the API, without pages.
+    if path in settings()["kinds"] and media is None:
+        return not_acceptable()
+    if path in settings()["kinds"] and media != "text/html":
+        g.listing = path
+        g.media = media
+        return app.view_functions["records.listed"](kind=path)
+    # For a kind without a page of its own, the records are listed.
+    if path in settings()["kinds"] and request.url_rule is None:
+        return listing_page(path)
+    record = records.get(records.address(path))
+    if record is None:
+        return None
+    if media is None:
+        return not_acceptable()
+    if record.moved_to:
+        ending = request.path.removeprefix("/" + path) if request.path.startswith("/" + path) else ""
+        target = page_link(record.moved_to) + ending
+        if request.query_string:
+            target += "?" + request.query_string.decode()
+        return redirect(target, code=301)
+    if record.removed_at:
+        return render_template("records/gone.html", record=record, page_title=f"Removed — {SITE}"), 410
+    g.record = record
+    if media == "text/markdown":
+        return records_api.markdown_of(record)
+    # The address of the platform is the address of its dataset, so its data is the VoID description.
+    if media != "text/html":
+        # The data of another record is one document with its parts.
+        if record.iri == settings()["base"]:
+            return records_api.data(void.described(), media)
+        return records_api.data(documents.linked(record), media, record.iri)
+    # A record with no page of its own is shown on the general record page.
+    if request.url_rule is None:
+        return record_page(record)
+    return None
+
+
+@app.route("/<path:path>/ro-crate-metadata.json")
+def ro_crate(path: str):
+    """Return the RO-Crate of a model."""
+    record = records.get(records.address(path))
+    if not crates.of_models(record):
+        abort(404)
+    headers = {"Access-Control-Allow-Origin": "*", "Content-Disposition": f'inline; filename="{crates.file_name(record)}"'}
+    given = crates.zenodo(record)
+    if given is not None:
+        return Response(given, mimetype="application/ld+json", headers=headers)
+    headers["Link"] = f'<{crates.PROFILE}>; rel="profile", <{record.iri}>; rel="cite-as"'
+    return Response(json.dumps(crates.crate(record), indent=2), mimetype="application/ld+json", headers=headers)
+
+
+# The root of the draft crate of a model is at the model address with /ro-crate/ (linkeddata/crates.py).
+@app.route("/<path:path>/ro-crate/")
+def crate_root(path: str):
+    if not crates.of_models(records.get(records.address(path))):
+        abort(404)
+    return redirect(f"/{path}/ro-crate-metadata.json", code=303)
+
+
+@app.after_request
+def link_data(response):
+    links = []
+    if "record" in g:
+        links = [f'<{g.record.iri}>; rel="cite-as"', f'<{g.record.type}>; rel="type"']
+        for ending, media in records_api.FORMATS.items():
+            links.append(f'<{g.record.iri}{ending}>; rel="describedby"; type="{media}"')
+        if crates.of_models(g.record):
+            links.append(f'<{g.record.iri}/ro-crate-metadata.json>; rel="describedby"; type="application/ld+json"; profile="https://w3id.org/ro/crate"')
+        links.append(f'<{url_for("records.model_shapes", _external=True)}>; rel="http://www.w3.org/ns/ldp#constrainedBy"; type="text/turtle"')
+        links.append(f'<{g.record.iri}{records_api.MARKDOWN}>; rel="alternate"; type="text/markdown"')
+        response.headers["Vary"] = "Accept"
+    # The page and the data of a record link the licence of the record. Listings and the API link the licence of the records.
+    licences = []
+    if "record" in g:
+        licences = sorted(str(value) for value in records.graph([g.record.iri]).objects(URIRef(g.record.iri), SDO.license))
+    elif ("listing" in g or request.path.startswith("/api/")) and void.platform()["license"]:
+        licences = [void.platform()["license"]]
+    for licence in licences:
+        links.append(f'<{licence}>; rel="license"')
+    if "record" in g and g.record.iri != settings()["base"]:
+        links.append(f'<{settings()["base"]}>; rel="http://rdfs.org/ns/void#inDataset"')
+    if links:
+        given = response.headers.get("Link")
+        response.headers["Link"] = ", ".join(([given] if given else []) + links)
+    if "record" in g and request.method in ("GET", "HEAD") and response.status_code == 200:
+        conditional(response)
+    # Public data may be read by scripts of other sites, without credentials, as visitors.
+    if request.method in ("GET", "HEAD") and (request.path.startswith("/api/") or "listing" in g or ("record" in g and response.mimetype != "text/html")):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Expose-Headers"] = "Link, ETag, Last-Modified, X-Pagination"
+    return response
+
+
+def conditional(response) -> None:
+    """Return 304 Not Modified if no record was changed since the request version."""
+    latest = records.latest_change()
+    changed = max(datetime.fromisoformat(latest) if latest else STARTED, STARTED)
+    response.set_etag(f"{latest}-{int(STARTED.timestamp())}-{response.mimetype}", weak=True)
+    response.last_modified = changed
+    response.make_conditional(request)
+
+
+@app.context_processor
+def publisher_context() -> dict:
+    """Return the publisher of the platform and the licence of the records for the templates."""
+    return {"publisher_document": void.platform()["publisher"], "records_license": void.platform()["license"]}
+
+
+@app.context_processor
+def record_context() -> dict:
+    """Return the JSON-LD and data addresses of the record of the page."""
+    if "record" not in g:
+        return {}
+    formats = {}
+    for ending, media in records_api.FORMATS.items():
+        formats[media] = page_link(g.record.iri) + ending
+    try:
+        document = documents.page_document(g.record.iri, records.latest_change())
+    except ValueError as problem:
+        app.logger.warning("The record %s does not fit the model: %s", g.record.iri, problem)
+        document = None
+    found = {"record_document": document, "record_formats": formats, "record_markdown": page_link(g.record.iri) + records_api.MARKDOWN}
+    # Only models have an RO-Crate. It is the crate in Zenodo, or a draft made from the record.
+    if crates.of_models(g.record):
+        found.update(record_crate=page_link(g.record.iri) + "/ro-crate-metadata.json", record_crate_draft=crates.zenodo(g.record) is None)
+    return found
+
+
+################################################################################
+### Uploaded images
+@app.route("/images/<name>")
+def image(name: str):
+    if not NAME.fullmatch(name):
+        abort(404)
+    response = send_from_directory(folder(), name, mimetype="image/webp", max_age=31536000)
+    response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    response.headers["Content-Security-Policy"] = "default-src 'none'"
+    return response
+
+
+################################################################################
+### Profiles that the platform publishes
+@app.route("/profiles/<name>/<version>")
+@app.route("/profiles/<name>/<version>/<file>")
+def published_profile(name: str, version: str, file: str = "profile.ttl"):
+    response = send_from_directory(PROFILES, f"{name}/{version}/{file}", mimetype="text/turtle")
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+
+################################################################################
+### Discovery addresses of the data and the APIs
+CATALOG = "/.well-known/api-catalog"
+OPENAPI = "api/docs/openapi.json"
+DOCS = "api/docs/"
+
+
+def services() -> list[dict]:
+    """Return the APIs of the platform as linkset entries."""
+    found = [{
+        "anchor": records.address("api/"),
+        "service-desc": [{"href": records.address(OPENAPI), "type": "application/vnd.oai.openapi+json"}],
+        "service-doc": [{"href": records.address(DOCS), "type": "text/html"}],
+    }]
+    return found
+
+
+@app.route(CATALOG)
+def api_catalog():
+    body = json.dumps({"linkset": services()}, indent=1)
+    return Response(body, content_type='application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"',
+                    headers={"Access-Control-Allow-Origin": "*"})
+
+
+@app.route("/.well-known/void")
+def void_description():
+    media = request.accept_mimetypes.best_match(["text/turtle", "application/ld+json", *records_api.SERIALIZATIONS]) or "text/turtle"
+    answer = records_api.data(void.described(), media)
+    answer.headers["Access-Control-Allow-Origin"] = "*"
+    return answer
+
+
+@app.after_request
+def service_links(response):
+    links = []
+    if request.path.startswith("/api/"):
+        links.append(f'<{records.address(OPENAPI)}>; rel="service-desc"; type="application/vnd.oai.openapi+json"')
+        links.append(f'<{records.address(DOCS)}>; rel="service-doc"; type="text/html"')
+    if request.path == "/":
+        links.append(f'<{CATALOG}>; rel="api-catalog"')
+    if links:
+        given = response.headers.get("Link")
+        response.headers["Link"] = ", ".join(([given] if given else []) + links)
+    return response
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5050, debug=os.environ.get("FLASK_DEBUG") == "1")

@@ -1,0 +1,8 @@
+name: tools
+title: Tool catalogue
+url: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/cloud/cap/service_index.json
+# The detail file of each tool, by its key in the index, on the website of the catalogue.
+entries: https://YOUR-ORG.github.io/virtual-x-platform-config/cloud/service/{key}.json
+# The folder of the screenshots and logos of the tools.
+images: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/cloud/docs/service/
+parser: tools

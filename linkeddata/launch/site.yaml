@@ -1,0 +1,16 @@
+name: site
+title: Website pages
+# The content of the website pages, and the partner list. They are read once, at launch (linkeddata/launch/site.py),
+# and then edited in the editor. The files are in this repository.
+files:
+  home: linkeddata/launch/site/home.html
+  base: linkeddata/launch/site/base.html
+  explore_our_work: linkeddata/launch/site/explore_our_work.html
+  training: linkeddata/launch/site/training.html
+  impact: linkeddata/launch/site/impact.html
+  SafetyAssessmentWorkflow: linkeddata/launch/site/process_flow.html
+  terms_of_service: linkeddata/launch/site/terms_of_service.html
+  privacypolicy: linkeddata/launch/site/privacypolicy.html
+  casestudies: linkeddata/launch/site/casestudies.html
+  partners: static/images/partners/partners.txt
+parser: site

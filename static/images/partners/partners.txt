@@ -1,0 +1,10 @@
+# Ownership, copyright of logos, names, and trademarks belong to the respective organisations.
+#
+# Partner registry for the home-page logo grid: display order, names and links.
+# Format:  filename | Organization name | https://link   (name and link optional)
+# Only entries listed below are displayed. Images present in
+# static/images/partners/ but not listed here (or commented out with '#') are
+# ignored. Blank lines and lines starting with '#' are ignored.
+# See get_partner_logos() in app.py.
+
+example-partner.svg | Example Partner | https://example.org/

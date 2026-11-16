@@ -1,0 +1,6 @@
+name: methods
+title: Method catalogue
+url: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/cloud/cap/methods_index.json
+# The detail file of each method, by its key in the index.
+entries: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/cloud/docs/methods/{key}.json
+parser: methods

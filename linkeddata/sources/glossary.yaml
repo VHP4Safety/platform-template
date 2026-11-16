@@ -1,0 +1,8 @@
+name: glossary
+title: Glossary
+# The main branch of the glossary, read weekly. The pinned file (vocabulary) is used by the profile and the parsers;
+# pin a new version with python -m linkeddata pin glossary. Terms of the profile that are removed or renamed in that
+# branch are noted.
+url: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/glossary/glossary.owl
+vocabulary: glossary.ttl
+parser: glossary

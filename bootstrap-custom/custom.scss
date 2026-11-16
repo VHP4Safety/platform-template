@@ -1,0 +1,254 @@
+// Open Sans is served from static/fonts (latin and latin-ext), not from Google Fonts.
+@font-face {
+  font-family: "Open Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/open-sans-latin-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Open Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/open-sans-latin-ext-400.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Open Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/open-sans-latin-600.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Open Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/open-sans-latin-ext-600.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+// 1️⃣ Import Bootstrap's functions first
+@import "bootstrap/scss/functions";
+
+// 2️⃣ Define your custom colors
+$custom-colors: (
+  "vhppink": #e6007e, //Colour for tools
+  "vhppink-distinct": #c3007a, //Colour for regulatory question
+  "vhpblue": #307bbf, //Default color and tools/models/data
+  "vhporange": #eb5b25, // Colour for flow steps
+  "vhppurple": #29235c,
+  "vhpteal": #0b5a6c, // Colour for workflow step
+  "vhplight-blue": #c1e5f5,  // Colour for accents
+  "vhpdarkpurple": #593887, // Colour for process flow
+  "vhplightteal": #6ba3b0, // Colour for workflow substep
+  "vhpdarkteal": #006a6c, // Colour for dark teal
+  "vhpmaroon": #8f2d57,
+  "vhplight-purple": #ac9cc4,
+  "vhplight-green": #ebf1df,
+);  
+
+// 3️⃣ Import Bootstrap’s variables and merge
+@import "bootstrap/scss/variables";
+@import "bootstrap/scss/variables-dark";
+$theme-colors: map-merge($theme-colors, $custom-colors);
+@import "bootstrap/scss/maps";
+
+
+// build an rgb map for your custom colors
+$custom-colors-rgb: ();
+@each $name, $color in $custom-colors {
+  $custom-colors-rgb: map-merge($custom-colors-rgb, ($name: to-rgb($color)));
+}
+
+// merge into Bootstrap's theme rgb map (name depends on version)
+$theme-colors-rgb: map-merge($theme-colors-rgb, $custom-colors-rgb);
+
+// ---- Add semantic variants for LIGHT mode ----
+// Bootstrap 5.3 uses these semantic tokens in components like alerts. [1](https://getbootstrap.com/docs/5.3/customize/color/)
+$custom-text-emphasis: ();
+$custom-bg-subtle: ();
+$custom-border-subtle: ();
+
+@each $name, $color in $custom-colors {
+  $custom-text-emphasis: map-merge($custom-text-emphasis, ($name: shade-color($color, 60%)));
+  $custom-bg-subtle: map-merge($custom-bg-subtle, ($name: tint-color($color, 80%)));
+  $custom-border-subtle: map-merge($custom-border-subtle, ($name: tint-color($color, 60%)));
+}
+
+// These maps feed root CSS variable generation in v5.3’s color system. [1](https://getbootstrap.com/docs/5.3/customize/color/)[2](https://getbootstrap.com/docs/5.3/customize/color-modes/)
+$theme-colors-text: map-merge($theme-colors-text, $custom-text-emphasis);
+$theme-colors-bg-subtle: map-merge($theme-colors-bg-subtle, $custom-bg-subtle);
+$theme-colors-border-subtle: map-merge($theme-colors-border-subtle, $custom-border-subtle);
+
+// ---- Add semantic variants for DARK mode ----
+// _variables-dark.scss defines *-dark variables for default theme colors. You must add yours. [3](https://github.com/twbs/bootstrap/blob/main/scss/_variables-dark.scss)[2](https://getbootstrap.com/docs/5.3/customize/color-modes/)
+$custom-text-emphasis-dark: ();
+$custom-bg-subtle-dark: ();
+$custom-border-subtle-dark: ();
+
+@each $name, $color in $custom-colors {
+  // In dark mode, emphasis tends to be a tint (lighter), and subtle backgrounds are shades (darker). [3](https://github.com/twbs/bootstrap/blob/main/scss/_variables-dark.scss)
+  $custom-text-emphasis-dark: map-merge($custom-text-emphasis-dark, ($name: tint-color($color, 40%)));
+  $custom-bg-subtle-dark: map-merge($custom-bg-subtle-dark, ($name: shade-color($color, 80%)));
+  $custom-border-subtle-dark: map-merge($custom-border-subtle-dark, ($name: shade-color($color, 40%)));
+}
+
+// These maps are used when Bootstrap emits [data-bs-theme="dark"] CSS variables. [3](https://github.com/twbs/bootstrap/blob/main/scss/_variables-dark.scss)[2](https://getbootstrap.com/docs/5.3/customize/color-modes/)
+$theme-colors-text-dark: map-merge($theme-colors-text-dark, $custom-text-emphasis-dark);
+$theme-colors-bg-subtle-dark: map-merge($theme-colors-bg-subtle-dark, $custom-bg-subtle-dark);
+$theme-colors-border-subtle-dark: map-merge($theme-colors-border-subtle-dark, $custom-border-subtle-dark);
+
+// Cap .container max-width at 1140px (960px at lg) from lg up. Below lg, keep
+// Bootstrap's defaults so the container still fits smaller viewports. Replaces
+// the `.container { max-width: 900px !important }` rule that used to live in
+// static/css/base.css -- now driven by the SCSS map, no !important hack.
+$container-max-widths: (
+  sm: 540px,
+  md: 720px,
+  lg: 960px,
+  xl: 1140px,
+  xxl: 1140px,
+);
+
+// 4️⃣ Override Bootstrap link defaults BEFORE importing Bootstrap
+$link-color: $black;                      // Default link color
+$link-hover-color: map-get($theme-colors, "vhpblue");  // Hover color to your blue
+$link-decoration: none;
+
+// 5️⃣ Import the rest of Bootstrap (it now uses your colors)
+@import "bootstrap/scss/bootstrap";
+
+// Force white text on vhpblue solid buttons (override Bootstrap's auto-calculated contrast)
+.btn-vhpblue {
+  --bs-btn-color: #fff;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-color: #fff;
+  --bs-btn-disabled-color: #fff;
+}
+
+// Force white text on vhpblue outline buttons when hovered/active (filled state)
+.btn-outline-vhpblue {
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-color: #fff;
+}
+
+/* Grid layout for Search/Filter Results */
+.results-section {
+  min-height: 400px;
+}
+
+.results-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 20px;
+}
+/* Custom Scrollbar */
+html {
+  scrollbar-color: var(--bs-vhppink) var(--white);
+}
+
+/* Apply Open Sans globally */
+body {
+  font-family: "Open Sans", Arial, sans-serif;
+  scroll-behavior: smooth;
+  padding-top: 100px; /* Adjust if navbar height changes */
+}
+
+/* Default accordion button (collapsed) stays standard */
+.accordion-button {
+  background-color: var(--bs-white);
+  color: var(--bs-body-color);
+  border: none;
+}
+
+/* When the accordion is open (NOT collapsed) */
+.accordion-button:not(.collapsed) {
+  background-color: var(--bs-vhplight-blue);
+  color: var(--bs-body-color);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.125);
+}
+
+/* Remove Bootstrap’s dark gradient focus ring */
+.accordion-button:focus {
+  box-shadow: none;
+  border-color: transparent;
+}
+
+/* Optional: make arrow icon darker on light blue */
+.accordion-button:not(.collapsed)::after {
+  filter: brightness(0.6);
+}
+
+/* Cards as a button */
+.card-button:hover, .card-button:focus {
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+// Generate hover/focus styles for each color in your custom palette
+@each $name, $value in $custom-colors {
+  .card-button-#{$name}:hover,
+  .card-button-#{$name}:focus {
+    color: var(--bs-#{$name});
+    border-color: var(--bs-#{$name});
+  }
+}
+
+/* Glossary tooltip – fixed bottom-left overlay, VHP themed */
+.tooltip.vhp-glossary-tooltip-fixed {
+  --bs-tooltip-max-width: 300px;
+  --bs-tooltip-bg: var(--bs-vhpblue);
+  --bs-tooltip-color: #fff;
+  --bs-tooltip-opacity: 0.95;
+  --bs-tooltip-padding-x: 0.75rem;
+  --bs-tooltip-padding-y: 0.5rem;
+  position: fixed !important;
+  bottom: 2px !important;
+  left: 2px !important;
+  top: auto !important;
+  right: auto !important;
+  transform: none !important;
+  margin: 0 !important;
+
+  .tooltip-arrow {
+    display: none !important;
+  }
+
+  .tooltip-inner {
+    text-align: left;
+    border-radius: var(--bs-border-radius-lg);
+  }
+}
+
+// Responsive white-space utilities. Bootstrap 5.3 ships .text-wrap and
+// .text-nowrap but not breakpoint variants; generate them mobile-first so
+// e.g. `text-wrap text-md-nowrap` wraps on phones and stops wrapping at md+.
+@each $breakpoint in map-keys($grid-breakpoints) {
+  @include media-breakpoint-up($breakpoint) {
+    $infix: breakpoint-infix($breakpoint, $grid-breakpoints);
+    @if $infix != "" {
+      .text#{$infix}-wrap   { white-space: normal !important; }
+      .text#{$infix}-nowrap { white-space: nowrap !important; }
+    }
+  }
+}
+
+// Responsive `.rounded-start-{bp}-0`. Lets us pair `rounded-start` (mobile)
+// with `rounded-start-md-0` (restore the input-group default square edge
+// at md+) when a leading addon is hidden below a breakpoint.
+@each $breakpoint in map-keys($grid-breakpoints) {
+  @include media-breakpoint-up($breakpoint) {
+    $infix: breakpoint-infix($breakpoint, $grid-breakpoints);
+    @if $infix != "" {
+      .rounded-start#{$infix}-0 {
+        border-top-left-radius: 0 !important;
+        border-bottom-left-radius: 0 !important;
+      }
+    }
+  }
+}
+

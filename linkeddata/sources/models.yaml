@@ -1,0 +1,8 @@
+name: models
+title: Zenodo community, models
+# The models of a Zenodo community, from their RO-Crates. Give the identifier of your community and set enabled to true.
+enabled: false
+url: https://zenodo.org/api/records?communities=YOUR-COMMUNITY&type=model&size=25&sort=newest
+# Only these files are read from the RO-Crate zip of each model (linkeddata/parsers/models.py).
+members: [ro-crate-metadata.json, pbpk-model-metadata.json]
+parser: models

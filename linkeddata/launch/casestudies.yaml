@@ -1,0 +1,11 @@
+name: casestudies
+title: Use cases
+parser: casestudies
+# The RO-Crate of the use cases, and the content file of each use case, by its identifier (the slug in its address).
+files:
+  crate: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/casestudies/ro-crate-metadata.json
+  demo: https://raw.githubusercontent.com/YOUR-ORG/virtual-x-platform-config/refs/heads/main/casestudies/demo_content.json
+# The code of each use case question in the tool and method catalogues (reg_q_ plus the id of the question, such as
+# reg_q_1a), with the address of the question: casestudies/<identifier>/<value of the question>.
+questions:
+  reg_q_1a: casestudies/demo/Q1

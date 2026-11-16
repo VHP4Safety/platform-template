@@ -1,0 +1,8 @@
+name: nwopen
+title: NWO projects (NWOpen API)
+# The projects funded by the Dutch Research Council (NWO) that are followed, each by the platform address of its grant
+# (linkeddata/parsers/nwopen.py). Give the project identifier of your grant and set enabled to true.
+enabled: false
+files:
+  grants/your-grant: https://nwopen-api.nwo.nl/NWOpen-API/api/Projects?project_id=YOUR.PROJECT.ID
+parser: nwopen

@@ -1,0 +1,8 @@
+name: peertube
+title: Videos (PeerTube)
+# The videos of a PeerTube account, as training materials. Give the address of your account and set enabled to true.
+enabled: false
+url: https://video.example.org/api/v1/accounts/YOUR-ACCOUNT/videos?count=100
+# The response for each video, with its full description, by its identifier.
+entries: https://video.example.org/api/v1/videos/{key}
+parser: peertube

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 100" role="img" aria-label="Virtual X Platform placeholder logo">
+  <polygon points="50,6 88,28 88,72 50,94 12,72 12,28" fill="#29235c"/>
+  <path d="M34 32 L66 68 M66 32 L34 68" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+  <text x="108" y="48" font-family="Open Sans, Arial, sans-serif" font-size="30" font-weight="700" fill="#29235c">VIRTUAL X</text>
+  <text x="108" y="82" font-family="Open Sans, Arial, sans-serif" font-size="30" font-weight="400" fill="#307bbf">PLATFORM</text>
+</svg>

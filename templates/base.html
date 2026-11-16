@@ -1,0 +1,411 @@
+<!-- Main base template of the web app, other HTML's are all added in this one. The name of the platform, its project
+     and its glossary are in site, from linkeddata/model/v1/settings.yaml. -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- SEO: title, description and canonical are per-page. Routes pass
+         page_title / meta_description / canonical_url; inject_seo_defaults()
+         supplies sensible defaults for any page that does not. -->
+    <title>{{ page_title }}</title>
+    <meta name="description" content="{{ meta_description }}" />
+    <link rel="canonical" href="{{ canonical_url }}" />
+    {% for media, href in (record_formats or {}).items() %}
+    <link rel="describedby" type="{{ media }}" href="{{ href }}" />
+    {% endfor %}
+    {% if record_markdown %}
+    <link rel="alternate" type="text/markdown" href="{{ record_markdown }}" />
+    {% endif %}
+
+    <!-- Open Graph / Twitter Card for link previews (and minor search signal) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="{{ site.title }}" />
+    <meta property="og:title" content="{{ page_title }}" />
+    <meta property="og:description" content="{{ meta_description }}" />
+    <meta property="og:url" content="{{ canonical_url }}" />
+    <meta property="og:image" content="{{ request.url_root }}static/images/logo.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Google Search Console verification (set GOOGLE_SITE_VERIFICATION env var) -->
+    {% if config.GOOGLE_SITE_VERIFICATION %}
+    <meta name="google-site-verification" content="{{ config.GOOGLE_SITE_VERIFICATION }}" />
+    {% endif %}
+
+    {% if record_document %}
+    <!-- The record of the page, as published. It is the first block, as only the first block is read by some programs. -->
+    <script type="application/ld+json" id="record-document">{{ record_document|tojson }}</script>
+    {% endif %}
+
+    {% if publisher_document %}
+    <!-- The publisher of the platform, from its record, for search engines -->
+    <script type="application/ld+json">{{ publisher_document|tojson }}</script>
+    {% endif %}
+
+    {% if config.DEBUG %}
+    <!-- we are running in DEBUG mode -->
+    {% else %}
+    <!-- we are NOT running in DEBUG mode -->
+    {% endif %}
+    
+    <!-- Bootstrap 5.3.8 CSS -->
+    <link href="/static/css/bootstrap-custom.css" rel="stylesheet">
+    <link href="/static/css/base.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css" integrity="sha384-CK2SzKma4jA5H/MXDUU7i1TqZlCFaD4T01vtyDFvPlD97JQyS+IsSh1nI2EFbpyk" crossorigin="anonymous">
+
+    <!-- jQuery -->
+    <script defer src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs" crossorigin="anonymous"></script>
+
+    {% if site.visit_counter %}
+    <!-- Goatcounter.com, the GDPR-compliant page visit counter. The path is counted without the query string. -->
+    <script data-goatcounter="{{ site.visit_counter }}" data-goatcounter-settings='{"path": {{ request.path|tojson }}}' async src="//gc.zgo.at/count.js"></script>
+    {% endif %}
+
+    <!-- Favicon -->
+    <link
+      rel="icon"
+      href="/static/images/icon.png"
+      type="image/x-icon"
+    />
+
+    {% block head %}{% endblock %}
+  </head>
+
+  <nav class="navbar navbar-expand-xxl py-md-2 pe-md-2 pe-0 py-0  navbar-light bg-white border-bottom fixed-top">
+    <div class="container-fluid d-flex align-items-center justify-content-between">
+
+    <!-- Logo -->
+    <a class="navbar-brand ms-xxl-3" href="/">
+      <img
+        src="/static/images/logo.svg"
+        alt="{{ site.title }} logo"
+        height="70"
+        class="d-inline-block align-text-top"
+      />
+    </a>
+  
+
+
+  <!-- Hamburger toggler for mobile -->
+  <button class="navbar-toggler me-0" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasMenu" aria-controls="offcanvasMenu" aria-label="Toggle navigation">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+
+
+  <!-- Desktop buttons (hidden on mobile) -->
+  <div class="d-none d-xxl-flex align-items-center gap-3">
+    
+    <!-- Glossary Toggle Switch -->
+    <div class="form-check form-switch mb-0 text-nowrap" data-vhp-glossary-skip>
+      <input class="form-check-input" type="checkbox" role="switch" id="glossary-toggle">
+      <label class="form-check-label small" for="glossary-toggle">Glossary</label>
+    </div>
+    <!-- Search Button Group -->
+
+    <div class="" >
+      <form class="input-group" role="search" onsubmit="return false;">
+
+        <!-- Wrapper for searchbar -->
+        <div class="input-group" style="max-width:300px">
+          
+          <span class="input-group-text" id="searchIcon">
+              <i class="bi bi-search"></i>
+          </span>
+
+          <input
+            class="form-control rounded-end"
+            type="search"
+            autocomplete="off"
+            placeholder='Search site'
+            id="searchInput"
+            aria-label="Search"
+            aria-describedby="searchIcon"
+          >
+
+
+          <!-- Live result dropdown -->
+          <ul
+            id="results"
+            class="search-results overflow-y-visible list-group w-100"
+            style="top: 100%; z-index: 1000;"
+          ></ul>
+        </div>
+
+      
+
+      </form>
+    </div>
+
+    <!-- Collapsible implementation menu -->
+	 <div class="btn-group" role="group" >
+      <button class="btn btn-outline-secondary text-nowrap" style="width:120px" onclick="location.href='{{ url_for('home') }}#about-section'" type="button">About</button>
+      <button type="button" style="min-width:30px" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+		<span class="visually-hidden">Toggle Dropdown</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><a class="dropdown-item" href="/explore_our_work">Project</a></li>
+        <li><a class="dropdown-item" href="/training">Training</a></li>
+        <li><a class="dropdown-item" href="/impact">Impact</a></li>
+      </ul>
+    </div>
+
+     <!-- Use Cases Button Group -->
+    <div class="btn-group" role="group">
+      <button class="btn btn-vhppink-distinct text-nowrap" style="width:120px" onclick="location.href='/casestudies'" type="button">Use Cases</button>
+      <button type="button" style="min-width:30px" class="btn btn-vhppink-distinct text-white dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+        <span class="visually-hidden">Toggle Dropdown</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        {% for study in casestudies_menu %}
+        <li><a class="dropdown-item" href="{{ study.path }}">{{ study.name }}</a></li>
+        {% else %}
+        <li><div class="dropdown-item-text text-muted">No use cases yet</div></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+
+    <!-- Tools Button Group -->
+ 
+    <div class="btn-group"  role="group">
+      <button class="btn btn-vhpblue text-nowrap" style="width:120px" onclick="location.href='/tools'" type="button">Tools</button>
+      <button class="btn btn-vhpblue dropdown-toggle-split dropdown-toggle" style="width:30px" type="button" id="toolsMenuBtn" data-bs-toggle="dropdown" aria-expanded="false">
+        <span class="visually-hidden">Toggle Dropdown</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end" id="toolsMenu" aria-labelledby="toolsMenuBtn" data-page-size="12">
+        <li><div class="dropdown-item-text text-muted">Loading…</div></li>
+      </ul>
+    </div>
+
+    <div class="btn-group"  role="group">
+      <button class="btn btn-vhpblue text-nowrap" style="width:120px" onclick="location.href='/methods'"
+        type="button">Methods</button>
+      <button type="button" style="width:30px" class="btn btn-vhpblue dropdown-toggle dropdown-toggle-split" id="methodsMenuBtn" data-bs-toggle="dropdown" aria-expanded="false">
+        <span class="visually-hidden">Toggle Dropdown</span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end" id="methodsMenu" aria-labelledby="methodsMenuBtn" data-page-size="12">
+        <li><div class="dropdown-item-text text-muted">Loading…</div></li>
+      </ul>
+    </div>
+
+
+    <!-- Data Button -->
+    <button class="btn btn-vhpblue text-nowrap" style="width: 150px;" onclick="location.href='/data'" type="button">Data</button>
+
+  </div>
+</nav>
+
+<!-- Offcanvas Menu for Mobile -->
+<div class="offcanvas offcanvas-end bg-light-vhpblue" tabindex="-1" id="offcanvasMenu" aria-labelledby="offcanvasMenuLabel">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="offcanvasMenuLabel">Menu</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body">
+    <div class="d-flex flex-column gap-2 h-100">
+
+      <!-- Search -->
+      <div class="" >
+        <form class="input-group" role="search" onsubmit="return false;">
+
+        <!-- Wrapper for searchbar -->
+        <div class="input-group">
+          
+          <span class="input-group-text" id="searchIconMobile">
+              <i class="bi bi-search"></i>
+          </span>
+
+          <input
+            class="form-control rounded-end"
+            type="search"
+            autocomplete="off"
+            placeholder='Search site '
+            id="searchInputMobile"
+            aria-label="Search"
+            aria-describedby="searchIconMobile"
+          >
+
+
+          <!-- Live result dropdown -->
+          <ul
+            id="resultsMobile"
+            class="search-results overflow-y-visible  list-group w-100"
+            data-bs-auto-close="outside"
+            style="top: 100%; z-index: 1000;"
+          ></ul>
+        </div>
+
+      
+
+      </form>
+    </div>
+
+      <!-- Use Cases collapse menu -->
+      <div class="btn-group">
+        <button class="btn btn-vhppink-distinct" onclick="location.href='/casestudies'" data-bs-dismiss="offcanvas">Use Cases</button>
+        <button class="btn btn-vhppink-distinct dropdown-toggle dropdown-toggle-split flex-grow-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCaseStudies" aria-expanded="false" aria-controls="collapseCaseStudies" style="width: 3rem;"></button>
+      </div>
+      <div class="collapse" id="collapseCaseStudies">
+        <div class="d-flex flex-column ps-3 gap-2">
+          {% for study in casestudies_menu %}
+          <button class="btn btn-light text-start" onclick="location.href='{{ study.path }}'" data-bs-dismiss="offcanvas">{{ study.name }}</button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Tools collapse menu -->
+      <div class="btn-group">
+        <button class="btn btn-vhpblue" onclick="location.href='/tools'" data-bs-dismiss="offcanvas">Tools</button>
+        <button class="btn btn-vhpblue dropdown-toggle dropdown-toggle-split flex-grow-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTools" aria-expanded="false" aria-controls="collapseTools" style="width: 3rem;"></button>
+      </div>
+      <div class="collapse" id="collapseTools">
+        <div class="d-flex flex-column ps-3 gap-2">
+          <!-- Tools links, after the models -->
+          <button class="btn btn-light text-start" onclick="location.href='/models'" data-bs-dismiss="offcanvas">Models</button>
+           {% for tool in tools_menu %}
+            <button class="btn btn-light text-start" onclick="location.href='/tools/{{tool.id}}'" data-bs-dismiss="offcanvas">{{tool.title}}</button>
+          {% endfor%}
+        </div>
+      </div>
+
+      <!-- Methods button -->
+      <div class="btn-group">
+        <button class="btn btn-vhpblue" onclick="location.href='/methods'" data-bs-dismiss="offcanvas">Methods</button>
+        <!-- Collapse toggle -->
+        <button class="btn btn-vhpblue dropdown-toggle dropdown-toggle-split flex-grow-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapseMethods" aria-expanded="false" aria-controls="collapseMethods" style="width: 3rem;"></button>
+      </div>
+
+      <!-- dropdownitems with Javier's logic-->
+      <div class="collapse" id="collapseMethods">
+        <div class="d-flex flex-column ps-3 gap-2 mt-1">
+          {% for m in methods_menu %}
+            <button class="btn btn-light text-start" onclick="location.href='/methods/{{ m.id }}'" data-bs-dismiss="offcanvas"> {{ m.title }} </button>
+          {% else %}
+            <span class="text-muted ps-2">No methods available</span>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Data button -->
+      <button class="btn btn-vhpblue" onclick="location.href='/data'" data-bs-dismiss="offcanvas">Data</button>
+
+      <!-- Glossary Toggle Switch (mobile) -->
+      <div class="form-check form-switch mt-2" data-vhp-glossary-skip>
+        <input class="form-check-input" type="checkbox" role="switch" id="glossary-toggle-mobile"
+               onchange="document.getElementById('glossary-toggle').checked = this.checked;
+                         document.getElementById('glossary-toggle').dispatchEvent(new Event('change'));
+                         this.closest('.offcanvas') && bootstrap.Offcanvas.getInstance(this.closest('.offcanvas'))?.hide();">
+        <label class="form-check-label" for="glossary-toggle-mobile">Glossary</label>
+      </div>
+      <!-- Implementation links (mobile) — pinned to bottom, collapse expands upward -->
+      <div class="mt-auto">
+        <div class="collapse" id="collapseImplementation">
+          <div class="d-flex flex-column ps-3 gap-2 mb-2">
+            <button class="btn btn-light text-start" onclick="location.href='/explore_our_work'" data-bs-dismiss="offcanvas">Process</button>
+            <button class="btn btn-light text-start" onclick="location.href='/training'" data-bs-dismiss="offcanvas">Training</button>
+            <button class="btn btn-light text-start" onclick="location.href='/impact'" data-bs-dismiss="offcanvas">Impact</button>
+          </div>
+        </div>
+        <div class="btn-group w-100">
+          <button class="btn btn-outline-secondary" onclick="location.href='{{ url_for('home') }}#about-section'" data-bs-dismiss="offcanvas">About</button>
+          <button class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split flex-grow-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapseImplementation" aria-expanded="false" aria-controls="collapseImplementation" style="width: 3rem;"></button>
+        </div>
+      </div>
+    <!-- end of implementation links (mobile) -->
+    </div>
+  </div>
+</div>
+
+  <!-- Main Content Section: replaced by child templates -->
+    <main class="">{% block content %} {% endblock %}</main>
+
+  <!-- Footer Section: site links, resources, legal, connect -->
+    <footer class="bg-vhplight-blue py-5 mt-auto">
+      <div class="container">
+        <div class="row g-4">
+          <div class="col-md-3">
+            <h6 class="text-uppercase fw-bold mb-3">EXPLORE</h6>
+            <ul class="list-unstyled">
+              <li><a href="/tools" class="text-decoration-none link-vhppink fs-7 small">Tools</a></li>
+              <li><a href="/casestudies" class="text-decoration-none link-vhppink fs-7 small">Use Cases</a></li>
+              <li><a href="/methods" class="text-decoration-none link-vhppink fs-7 small">Methods</a></li>
+              <li><a href="/data" class="text-decoration-none link-vhppink fs-7 small">Data</a></li>
+              <li><a href="/explore_our_work" class="text-decoration-none link-vhppink fs-7 small">Project</a></li>
+              <li><a href="/training" class="text-decoration-none link-vhppink fs-7 small">Training</a></li>
+              <li><a href="/impact" class="text-decoration-none link-vhppink fs-7 small">Impact</a></li>
+            </ul>
+          </div>
+          <div class="col-md-3">
+            <h6 class="text-uppercase fw-bold mb-3">RESOURCES</h6>
+            <ul class="list-unstyled">
+              <li><a href="{{ url_for('home') }}#about-section" class="text-decoration-none link-vhppink fs-7 small">About</a></li>
+              <li><a href="{{ url_for('home') }}#partners-section" class="text-decoration-none link-vhppink fs-7 small">Partners</a></li>
+              <li><a href="{{ url_for('home') }}#contact-section" class="text-decoration-none link-vhppink fs-7 small">Contact</a></li>
+              <li><a href="{{ url_for('api-docs.openapi_swagger_ui') }}" class="text-decoration-none link-vhppink fs-7 small">API</a></li>
+              <li><a href="{{ url_for('account.account_tokens') }}" class="text-decoration-none link-vhppink fs-7 small">Editors</a></li>
+            </ul>
+          </div>
+          <div class="col-md-3">
+            <h6 class="text-uppercase fw-bold mb-3">LEGAL</h6>
+            <ul class="list-unstyled">
+              <li><a href="/legal/terms_of_service" class="text-decoration-none link-vhppink fs-7 small">Terms of Service</a></li>
+              <li><a href="/legal/privacypolicy" class="text-decoration-none link-vhppink fs-7 small">Privacy Policy</a></li>
+            </ul>
+          </div>
+          <div class="col-md-3">
+            <h6 class="text-uppercase fw-bold mb-3">CONNECT</h6>
+            <ul class="list-unstyled">
+              <li><a href="{{ site.project.url }}" class="text-decoration-none link-vhppink fs-7 small">{{ site.project.name }}</a></li>
+              <li><a href="https://github.com/YOUR-ORG" class="text-decoration-none link-vhppink fs-7 small">GitHub</a></li>
+              <li><a href="{{ site.glossary.site }}" class="text-decoration-none link-vhppink fs-7 small">Glossary</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="row mt-3">
+          <div class="col-12 text-center">
+            <p class="mb-0 small">&copy; {{ site.project.name }}. Code licensed with <a href="https://github.com/YOUR-ORG/virtual-x-platform/blob/main/LICENSE.md">AGPL-3</a>,
+              based on the <a href="https://github.com/VHP4Safety/virtual-human-platform">VHP4Safety Virtual Human Platform</a>{% if records_license %}; records with <a href="{{ records_license }}">{{ records_license.rsplit("/", 1)[-1] }}</a>{% endif %}.</p>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Bootstrap 5.3.3 JS Bundle (includes Popper) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+
+    <!-- Glossary Term Highlighter -->
+    <script src="/static/js/glossary_highlighter.js"></script>
+
+    <!-- script for search bar's functionality -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2" integrity="sha384-zPE55eyESN+FxCWGEnlNxGyAPJud6IZ6TtJmXb56OFRGhxZPN4akj9rjA3gw5Qqa" crossorigin="anonymous"></script>
+    <script src="/static/js/search_bar.js"></script>
+    <script src="/static/js/dropdown_paginate.js"></script>
+
+    <script>
+      // Needs to be accessible to jinja2, hence in html not js file
+      // Store contextprocessor vars for dropdown menu
+      window.TOOLS_MENU = (function(){ try { return {{ tools_menu | tojson | safe }}; } catch(e) { return []; } })();
+      window.TOOLS_MENU = Array.isArray(window.TOOLS_MENU) ? window.TOOLS_MENU : [];
+      // The Tools menu starts with the models, which have a page of their own.
+      window.TOOLS_DROPDOWN = [{id: "models", title: "Models", main_url: "/models"}].concat(window.TOOLS_MENU);
+      window.METHODS_MENU = (function(){ try { return {{ methods_menu | tojson | safe }}; } catch(e) { return []; } })();
+      window.METHODS_MENU = Array.isArray(window.METHODS_MENU) ? window.METHODS_MENU : [];
+      window.DATA_MENU = (function(){ try { return {{ data_menu | tojson | safe }}; } catch(e) { return []; } })();
+      window.DATA_MENU = Array.isArray(window.DATA_MENU) ? window.DATA_MENU : [];
+      window.CASESTUDIES_MENU = {{ casestudies_menu | tojson }};
+    </script>
+
+    {% block scripts %}{% endblock %}
+
+    <!-- Global Bootstrap tooltip init. Skips glossary spans (those are
+         initialized with custom click-trigger options by glossary_highlighter.js).
+         getOrCreateInstance is idempotent, so per-page init code is harmless. -->
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('[data-bs-toggle="tooltip"]:not([data-vhp-glossary])')
+          .forEach(el => bootstrap.Tooltip.getOrCreateInstance(el));
+      });
+    </script>
+  </body>
+</html>

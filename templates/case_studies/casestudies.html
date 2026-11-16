@@ -1,0 +1,28 @@
+{% extends 'base.html' %} {% block content %}
+  <link rel="stylesheet" href="/static/css/casestudies.css" />
+
+  <section class="container py-md-5 py-3">
+    <div class="">
+      <h1><span class="text-vhppink-distinct" id="collection-name">Use Cases</span></h1>
+      <p class="text-secondary fs-5">The {{ site.title }} is demonstrated with {{ case_studies|length }} use case{{ '' if case_studies|length == 1 else 's' }}.</p>
+      <p class="mb-4" style="text-align: justify;">
+        For each use case, one or more questions are defined to demonstrate how the platform supports answering them step by step. Within the process flow steps, users can access the tools, methods, and data needed to address these questions. For more information, visit the process flow <a class="link-vhppink-distinct text-decoration-none" href="{{ url_for('SafetyAssessmentWorkflow') }}">info page.</a>
+      </p>
+    </div>
+    <div class="row row-cols-1 row-cols-md-3 g-4 mt-3">
+      {% for case in case_studies %}
+      <div class="col">
+        <a href="{{ case.address|page_link }}" class="text-decoration-none">
+          <div class="card h-100 text-center card-button card-button-vhppink-distinct border-2">
+            {% if case.icon %}<img src="{{ case.icon|page_link }}" class="card-img-top p-4 img-fluid" alt="{{ case.name }}" style="max-width: 120px; margin: 0 auto;" />{% endif %}
+            <div class="card-body pt-0">
+              <h5 class="card-title">{{ case.name }}</h5>
+              <p class="card-text fw-normal">{{ case.aim }}</p>
+            </div>
+          </div>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}
